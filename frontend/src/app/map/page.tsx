@@ -1,13 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { Layers, MapPin, ArrowRight, Compass, Sparkles } from "lucide-react";
 import SeverityBadge from "@/components/SeverityBadge";
 import OSMIndiaMapContainer from "@/components/OSMIndiaMapContainer";
 import EmptyState from "@/components/EmptyState";
 import { useLocation } from "@/context/LocationContext";
-import { getXAIExplanation, XAIExplanation } from "@/lib/api";
+import { getXAIExplanation, XAIExplanation, getPredictions, getAtmosphericSnapshot } from "@/lib/api";
 
 import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
@@ -40,33 +40,104 @@ function NowcastMapContent() {
   const [selectedNode, setSelectedNode] = useState<GridNode | null>(null);
   const [xaiData, setXaiData] = useState<XAIExplanation | null>(null);
   const [loadingXAI, setLoadingXAI] = useState(false);
+  const [loadingPanel, setLoadingPanel] = useState(false);
+
+  // Ref to track the currently selected lat/lon to avoid stale closures
+  const selectedCoordsRef = useRef<{ lat: number; lon: number } | null>(null);
+
+  // Fetch real prediction + atmospheric data for the selected cell and horizon
+  const fetchCellData = useCallback(async (lat: number, lon: number, horizonStr: string) => {
+    const forecastHourNum = Number(horizonStr.replace("+", "").replace("H", ""));
+    selectedCoordsRef.current = { lat, lon };
+    setLoadingPanel(true);
+    // Clear stale values immediately
+    setSelectedNode(null);
+
+    try {
+      // Fetch predictions for this cell from existing /api/predictions endpoint
+      const [predResponse, snapResponse] = await Promise.allSettled([
+        getPredictions(forecastHourNum, lat, lon, 1),
+        getAtmosphericSnapshot(lat, lon),
+      ]);
+
+      // If coords changed while fetching, discard
+      if (
+        selectedCoordsRef.current?.lat !== lat ||
+        selectedCoordsRef.current?.lon !== lon
+      ) return;
+
+      // Parse predictions
+      let cloudburstProb = "—";
+      let thunderstormProb = "—";
+      let flashFloodProb = "—";
+      let risk: GridNode["risk"] = "moderate";
+
+      if (predResponse.status === "fulfilled" && predResponse.value) {
+        const predData = predResponse.value;
+        // Find the closest cell to the selected lat/lon
+        const cells = predData.cells || [];
+        let closestCell = cells[0];
+        let minDist = Infinity;
+        for (const cell of cells) {
+          const d = Math.abs(cell.lat - lat) + Math.abs(cell.lon - lon);
+          if (d < minDist) { minDist = d; closestCell = cell; }
+        }
+        if (closestCell) {
+          const cb = closestCell.predictions?.cloudburst;
+          const ts = closestCell.predictions?.thunderstorm;
+          const ff = closestCell.predictions?.flash_flood;
+          if (cb) cloudburstProb = `${Math.round(cb.probability * 100)}%`;
+          if (ts) thunderstormProb = `${Math.round(ts.probability * 100)}%`;
+          if (ff) flashFloodProb = `${Math.round(ff.probability * 100)}%`;
+
+          // Determine overall risk from active layer
+          const activePred = activeLayer === "cloudburst" ? cb : activeLayer === "thunderstorm" ? ts : ff;
+          if (activePred) {
+            const p = activePred.probability;
+            risk = p > 0.8 ? "critical" : p > 0.6 ? "high" : p > 0.4 ? "moderate" : "low";
+          }
+        }
+      }
+
+      // Parse atmospheric snapshot for QPE / elevation
+      let qpe = "—";
+      let elevation = "—";
+      if (snapResponse.status === "fulfilled") {
+        const snap = snapResponse.value;
+        qpe = `${snap.precipitation.toFixed(1)} mm/hr`;
+        elevation = `${Math.round(snap.elevation_m)} m`;
+      }
+
+      setSelectedNode({
+        id: `GRID-${lat.toFixed(4)}-${lon.toFixed(4)}`,
+        coords: `${lat.toFixed(4)}°N | ${lon.toFixed(4)}°E`,
+        lat,
+        lon,
+        risk,
+        cloudburst: cloudburstProb,
+        thunderstorm: thunderstormProb,
+        flashFlood: flashFloodProb,
+        elevation,
+        soilMoisture: "—",
+        qpe,
+      });
+    } catch (err) {
+      console.error("Cell data fetch error", err);
+    } finally {
+      if (
+        selectedCoordsRef.current?.lat === lat &&
+        selectedCoordsRef.current?.lon === lon
+      ) {
+        setLoadingPanel(false);
+      }
+    }
+  }, [activeLayer]);
 
   useEffect(() => {
     const latParam = searchParams.get("lat");
     const lonParam = searchParams.get("lon");
     const hazardParam = searchParams.get("hazard");
     const horizonParam = searchParams.get("horizon");
-    const alertIdParam = searchParams.get("alertId");
-
-    if (latParam && lonParam) {
-      const lat = parseFloat(latParam);
-      const lon = parseFloat(lonParam);
-      if (!isNaN(lat) && !isNaN(lon)) {
-        setSelectedNode({
-          id: alertIdParam || `GRID-${lat.toFixed(2)}-${lon.toFixed(2)}`,
-          coords: `${lat.toFixed(4)}°N | ${lon.toFixed(4)}°E`,
-          lat,
-          lon,
-          risk: "high",
-          cloudburst: "84%",
-          thunderstorm: "72%",
-          flashFlood: "88%",
-          elevation: "840 m",
-          soilMoisture: "82% Saturation",
-          qpe: "42.5 mm/hr",
-        });
-      }
-    }
 
     if (hazardParam) {
       const h = hazardParam.toLowerCase();
@@ -75,13 +146,32 @@ function NowcastMapContent() {
       else if (h.includes("cloudburst")) setActiveLayer("cloudburst");
     }
 
+    let horizon = "+4H";
     if (horizonParam) {
       const formatted = horizonParam.startsWith("+") ? horizonParam : `+${horizonParam.replace("H", "")}H`;
       if (HORIZONS.includes(formatted)) {
         setSelectedHorizon(formatted);
+        horizon = formatted;
       }
     }
-  }, [searchParams]);
+
+    if (latParam && lonParam) {
+      const lat = parseFloat(latParam);
+      const lon = parseFloat(lonParam);
+      if (!isNaN(lat) && !isNaN(lon)) {
+        fetchCellData(lat, lon, horizon);
+      }
+    }
+  }, [searchParams, fetchCellData]);
+
+  // Re-fetch when forecast horizon changes and a cell is already selected
+  useEffect(() => {
+    if (selectedCoordsRef.current) {
+      const { lat, lon } = selectedCoordsRef.current;
+      fetchCellData(lat, lon, selectedHorizon);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedHorizon]);
 
   useEffect(() => {
     if (selectedNode) {
@@ -289,19 +379,7 @@ function NowcastMapContent() {
               showRadar={showRadar}
               onToggleRadar={setShowRadar}
               onSelectHotspot={(hotspot) => {
-                setSelectedNode({
-                  id: hotspot.id,
-                  coords: `${hotspot.lat.toFixed(4)}°N | ${hotspot.lon.toFixed(4)}°E`,
-                  lat: hotspot.lat,
-                  lon: hotspot.lon,
-                  risk: hotspot.risk,
-                  cloudburst: hotspot.hazardType === "cloudburst" ? hotspot.prob : "78%",
-                  thunderstorm: hotspot.hazardType === "thunderstorm" ? hotspot.prob : "64%",
-                  flashFlood: hotspot.hazardType === "flash_flood" ? hotspot.prob : "72%",
-                  elevation: "840 m",
-                  soilMoisture: "82% Saturation",
-                  qpe: hotspot.qpe,
-                });
+                fetchCellData(hotspot.lat, hotspot.lon, selectedHorizon);
               }}
             />
 
@@ -316,7 +394,9 @@ function NowcastMapContent() {
               <h4 className="text-base font-bold text-navy mt-0.5">Selected Grid Cell</h4>
             </div>
 
-            {selectedNode ? (
+            {loadingPanel ? (
+              <div className="text-xs text-muted font-mono animate-pulse py-6 text-center">Loading cell data...</div>
+            ) : selectedNode ? (
               <>
                 <div className="flex items-center space-x-2 text-xs font-mono text-muted bg-page px-3 py-1.5 rounded-xl border border-border">
                   <MapPin className="w-3.5 h-3.5 text-brand shrink-0" />
