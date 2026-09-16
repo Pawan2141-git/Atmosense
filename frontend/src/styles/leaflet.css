@@ -1,0 +1,44 @@
+/* Custom Leaflet styling and animations for AtmoSense LeafMap */
+
+@keyframes pulse-ring {
+  0% {
+    transform: scale(0.8);
+    opacity: 0.8;
+  }
+  70% {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+
+.hotspot-pulse-ring {
+  animation: pulse-ring 2s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+}
+
+.leaflet-grid-cell {
+  transition: fill-opacity 0.2s ease, stroke-width 0.2s ease;
+}
+
+.leaflet-grid-cell:hover {
+  fill-opacity: 0.65 !important;
+  stroke-width: 2.5px !important;
+  cursor: pointer;
+}
+
+.custom-leaflet-tooltip {
+  background: rgba(14, 26, 56, 0.92) !important;
+  color: #ffffff !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  border-radius: 8px !important;
+  font-size: 11px !important;
+  padding: 6px 10px !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3) !important;
+}
+
+.custom-leaflet-tooltip::before {
+  border-top-color: rgba(14, 26, 56, 0.92) !important;
+}
