@@ -445,6 +445,10 @@ export async function getXAIExplanation(
       }));
     }
 
+    if (rawAttributions.length === 0) {
+      throw new Error("API returned empty feature attributions, forcing fallback");
+    }
+
     return {
       hazard: data.hazard || hazard,
       probability: typeof data.probability === "number" ? data.probability : 0.75,

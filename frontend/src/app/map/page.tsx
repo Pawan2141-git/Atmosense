@@ -39,25 +39,26 @@ function NowcastMapContent() {
   const [showRadar, setShowRadar] = useState(false);
   const [selectedNode, setSelectedNode] = useState<GridNode | null>(null);
   const [xaiData, setXaiData] = useState<XAIExplanation | null>(null);
-  const [loadingXAI, setLoadingXAI] = useState(false);
   const [loadingPanel, setLoadingPanel] = useState(false);
 
   // Ref to track the currently selected lat/lon to avoid stale closures
   const selectedCoordsRef = useRef<{ lat: number; lon: number } | null>(null);
 
-  // Fetch real prediction + atmospheric data for the selected cell and horizon
-  const fetchCellData = useCallback(async (lat: number, lon: number, horizonStr: string) => {
+  // Fetch real prediction + atmospheric + XAI data for the selected cell and horizon
+  const fetchCellData = useCallback(async (lat: number, lon: number, horizonStr: string, hazardType: string) => {
     const forecastHourNum = Number(horizonStr.replace("+", "").replace("H", ""));
     selectedCoordsRef.current = { lat, lon };
     setLoadingPanel(true);
     // Clear stale values immediately
     setSelectedNode(null);
+    setXaiData(null);
 
     try {
-      // Fetch predictions for this cell from existing /api/predictions endpoint
-      const [predResponse, snapResponse] = await Promise.allSettled([
+      // Fetch predictions for this cell from existing API endpoints concurrently
+      const [predResponse, snapResponse, xaiResponse] = await Promise.allSettled([
         getPredictions(forecastHourNum, lat, lon, 1),
         getAtmosphericSnapshot(lat, lon),
+        getXAIExplanation(lat, lon, hazardType, forecastHourNum)
       ]);
 
       // If coords changed while fetching, discard
@@ -65,6 +66,10 @@ function NowcastMapContent() {
         selectedCoordsRef.current?.lat !== lat ||
         selectedCoordsRef.current?.lon !== lon
       ) return;
+
+      if (xaiResponse.status === "fulfilled" && xaiResponse.value) {
+        setXaiData(xaiResponse.value);
+      }
 
       // Parse predictions
       let cloudburstProb = "—";
@@ -91,7 +96,7 @@ function NowcastMapContent() {
           if (ff) flashFloodProb = `${Math.round(ff.probability * 100)}%`;
 
           // Determine overall risk from active layer
-          const activePred = activeLayer === "cloudburst" ? cb : activeLayer === "thunderstorm" ? ts : ff;
+          const activePred = hazardType === "cloudburst" ? cb : hazardType === "thunderstorm" ? ts : ff;
           if (activePred) {
             const p = activePred.probability;
             risk = p > 0.8 ? "critical" : p > 0.6 ? "high" : p > 0.4 ? "moderate" : "low";
@@ -131,9 +136,10 @@ function NowcastMapContent() {
         setLoadingPanel(false);
       }
     }
-  }, [activeLayer]);
+  }, []);
 
   useEffect(() => {
+    let layer = activeLayer;
     const latParam = searchParams.get("lat");
     const lonParam = searchParams.get("lon");
     const hazardParam = searchParams.get("hazard");
@@ -141,9 +147,9 @@ function NowcastMapContent() {
 
     if (hazardParam) {
       const h = hazardParam.toLowerCase();
-      if (h.includes("thunderstorm")) setActiveLayer("thunderstorm");
-      else if (h.includes("flash")) setActiveLayer("flash_flood");
-      else if (h.includes("cloudburst")) setActiveLayer("cloudburst");
+      if (h.includes("thunderstorm")) { setActiveLayer("thunderstorm"); layer = "thunderstorm"; }
+      else if (h.includes("flash")) { setActiveLayer("flash_flood"); layer = "flash_flood"; }
+      else if (h.includes("cloudburst")) { setActiveLayer("cloudburst"); layer = "cloudburst"; }
     }
 
     let horizon = "+4H";
@@ -159,32 +165,19 @@ function NowcastMapContent() {
       const lat = parseFloat(latParam);
       const lon = parseFloat(lonParam);
       if (!isNaN(lat) && !isNaN(lon)) {
-        fetchCellData(lat, lon, horizon);
+        fetchCellData(lat, lon, horizon, layer);
       }
     }
   }, [searchParams, fetchCellData]);
 
-  // Re-fetch when forecast horizon changes and a cell is already selected
+  // Re-fetch when forecast horizon or hazard layer changes and a cell is already selected
   useEffect(() => {
     if (selectedCoordsRef.current) {
       const { lat, lon } = selectedCoordsRef.current;
-      fetchCellData(lat, lon, selectedHorizon);
+      fetchCellData(lat, lon, selectedHorizon, activeLayer);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedHorizon]);
-
-  useEffect(() => {
-    if (selectedNode) {
-      setLoadingXAI(true);
-      const forecastHourNum = Number(selectedHorizon.replace("+", "").replace("H", ""));
-      getXAIExplanation(selectedNode.lat, selectedNode.lon, activeLayer, forecastHourNum)
-        .then((res) => {
-          setXaiData(res);
-        })
-        .catch((e) => console.warn("XAI fetch error", e))
-        .finally(() => setLoadingXAI(false));
-    }
-  }, [selectedNode, activeLayer, selectedHorizon]);
+  }, [selectedHorizon, activeLayer]);
 
   return (
     <div className="space-y-6 pb-12 max-w-[1600px] mx-auto animate-in fade-in duration-300" suppressHydrationWarning>
@@ -379,7 +372,7 @@ function NowcastMapContent() {
               showRadar={showRadar}
               onToggleRadar={setShowRadar}
               onSelectHotspot={(hotspot) => {
-                fetchCellData(hotspot.lat, hotspot.lon, selectedHorizon);
+                fetchCellData(hotspot.lat, hotspot.lon, selectedHorizon, activeLayer);
               }}
             />
 
@@ -435,9 +428,7 @@ function NowcastMapContent() {
                     </span>
                     <span className="text-[10px] font-mono text-muted">XAI Engine</span>
                   </div>
-                  {loadingXAI ? (
-                    <div className="text-xs text-muted font-mono animate-pulse">Calculating feature weights...</div>
-                  ) : xaiData && Array.isArray(xaiData.feature_attributions) && xaiData.feature_attributions.length > 0 ? (
+                  {xaiData && Array.isArray(xaiData.feature_attributions) && xaiData.feature_attributions.length > 0 ? (
                     <div className="space-y-1.5 text-xs">
                       {xaiData.feature_attributions.slice(0, 3).map((f) => (
                         <div key={f.feature_name} className="flex justify-between items-center">
@@ -447,10 +438,8 @@ function NowcastMapContent() {
                       ))}
                     </div>
                   ) : (
-                    <div className="text-[11px] text-muted space-y-1">
-                      <div className="flex justify-between"><span>High CAPE Buoyancy</span><strong className="text-navy">1950 J/kg</strong></div>
-                      <div className="flex justify-between"><span>Integrated Vapor (IWV)</span><strong className="text-navy">44.2 kg/m²</strong></div>
-                      <div className="flex justify-between"><span>Steep Terrain Slope</span><strong className="text-navy">32.4°</strong></div>
+                    <div className="text-[11px] text-muted text-center py-3 italic bg-slate-50/50 rounded-lg border border-slate-100">
+                      Risk driver details currently unavailable for this cell.
                     </div>
                   )}
                 </div>
