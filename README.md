@@ -1,5 +1,7 @@
 # Atmosense 🌩️
 
+🔗 **Live Demo**: [https://atmosense-j1w8.vercel.app](https://atmosense-j1w8.vercel.app)
+
 **AI-Powered Hyperlocal Severe Weather Nowcasting & Early Warning System**
 
 Atmosense provides 2–6 hour probabilistic predictions for thunderstorms, cloudbursts, and flash floods with explainable meteorological diagnosis — focused on India's high-risk regions like Uttarakhand, Western Ghats, and urban centers.
