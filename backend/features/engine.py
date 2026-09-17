@@ -39,7 +39,7 @@ def get_feature_vector_from_dataset(dataset: dict, lat_idx: int, lon_idx: int, f
     
     Returns dict: {feature_name: float_value, ...} with all 14 features.
     """
-    snapshot = dataset["snapshots"].get(forecast_hour, dataset["snapshots"][0])
+    snapshot = dataset["snapshots"].get(forecast_hour) or dataset["snapshots"].get(0) or next(iter(dataset["snapshots"].values()))
     terrain = dataset["terrain"]
 
     atmo = {}

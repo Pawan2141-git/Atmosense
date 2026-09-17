@@ -2,16 +2,9 @@
 Atmosense Core Configuration
 Centralized settings loaded from environment variables.
 """
-import os
-from enum import Enum
 from pydantic_settings import BaseSettings
 from pydantic import Field
-
-
-class DataMode(str, Enum):
-    LIVE = "LIVE"
-    DEMO = "DEMO"
-    BACKTEST = "BACKTEST"
+from backend.core.enums import DataMode  # single source of truth
 
 
 class Settings(BaseSettings):

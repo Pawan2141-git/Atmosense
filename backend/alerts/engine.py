@@ -20,6 +20,7 @@ class AlertEngine:
             RiskLevel.LOW: None,
             RiskLevel.MODERATE: AlertSeverity.WATCH,
             RiskLevel.HIGH: AlertSeverity.WARNING,
+            RiskLevel.VERY_HIGH: AlertSeverity.SEVERE,
             RiskLevel.CRITICAL: AlertSeverity.EXTREME
         }
         return mapping.get(risk_level)

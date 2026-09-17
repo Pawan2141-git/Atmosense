@@ -102,7 +102,7 @@ def _generate_alerts(
 
 @router.get("", response_model=AlertResponse)
 def get_alerts(
-    forecast_hour: Optional[int] = Query(2),
+    forecast_hour: int = Query(2),
     lat: Optional[float] = Query(None, description="Center latitude"),
     lon: Optional[float] = Query(None, description="Center longitude"),
     grid_size: int = Query(7, ge=1, le=7, description="Grid dimension (N x N, max 7)")
@@ -118,7 +118,7 @@ def get_alerts(
 
 @router.post("/evaluate", response_model=AlertResponse)
 def evaluate_alerts(
-    forecast_hour: Optional[int] = Query(2),
+    forecast_hour: int = Query(2),
     lat: Optional[float] = Query(None, description="Center latitude"),
     lon: Optional[float] = Query(None, description="Center longitude"),
     grid_size: int = Query(7, ge=1, le=7, description="Grid dimension (N x N, max 7)")

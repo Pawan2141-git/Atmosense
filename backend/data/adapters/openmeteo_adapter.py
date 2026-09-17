@@ -227,45 +227,45 @@ class OpenMeteoAdapter(BaseDataAdapter):
             cloud_cover_grid = np.zeros((nlat, nlon))
             temp_grid = np.zeros((nlat, nlon))
 
+            def _get_val(loc_hourly: dict, key: str, idx: int, default: float = 0.0) -> float:
+                series = loc_hourly.get(key)
+                if series and idx < len(series) and series[idx] is not None:
+                    return float(series[idx])
+                return default
+
             for i in range(nlat):
                 for j in range(nlon):
                     loc_idx = i * nlon + j
                     loc_hourly = raw_data_list[loc_idx].get("hourly", {})
 
-                    def _get_val(key: str, idx: int, default: float = 0.0) -> float:
-                        series = loc_hourly.get(key)
-                        if series and idx < len(series) and series[idx] is not None:
-                            return float(series[idx])
-                        return default
-
                     # Atmospheric features
-                    c_val = _get_val("cape", target_idx, 0.0)
-                    cin_val = _get_val("convective_inhibition", target_idx, 0.0)
+                    c_val = _get_val(loc_hourly, "cape", target_idx, 0.0)
+                    cin_val = _get_val(loc_hourly, "convective_inhibition", target_idx, 0.0)
                     cin_val = -abs(cin_val)  # Standardize CIN as negative J/kg
                     
-                    iwv_curr = _get_val("total_column_integrated_water_vapour", target_idx, 30.0)
-                    iwv_prev = _get_val("total_column_integrated_water_vapour", prev_idx, iwv_curr)
+                    iwv_curr = _get_val(loc_hourly, "total_column_integrated_water_vapour", target_idx, 30.0)
+                    iwv_prev = _get_val(loc_hourly, "total_column_integrated_water_vapour", prev_idx, iwv_curr)
                     delta_iwv = iwv_curr - iwv_prev
 
-                    precip_curr = _get_val("precipitation", target_idx, 0.0)
-                    precip_prob = _get_val("precipitation_probability", target_idx, 0.0)
+                    precip_curr = _get_val(loc_hourly, "precipitation", target_idx, 0.0)
+                    precip_prob = _get_val(loc_hourly, "precipitation_probability", target_idx, 0.0)
                     
                     # Compute rainfall accumulation up to target_idx
-                    accum = sum(_get_val("precipitation", k, 0.0) for k in range(base_idx, target_idx + 1))
+                    accum = sum(_get_val(loc_hourly, "precipitation", k, 0.0) for k in range(base_idx, target_idx + 1))
 
                     # Wind shear from 80m vs 10m wind speed
-                    w10 = _get_val("wind_speed_10m", target_idx, 5.0)
-                    w80 = _get_val("wind_speed_80m", target_idx, 10.0)
+                    w10 = _get_val(loc_hourly, "wind_speed_10m", target_idx, 5.0)
+                    w80 = _get_val(loc_hourly, "wind_speed_80m", target_idx, 10.0)
                     wind_shear = max(0.0, abs(w80 - w10) * 1.5)
 
                     # Cloud cover & CTT proxy
-                    c_cover = _get_val("cloud_cover", target_idx, 20.0)
-                    t2m = _get_val("temperature_2m", target_idx, 25.0)
+                    c_cover = _get_val(loc_hourly, "cloud_cover", target_idx, 20.0)
+                    t2m = _get_val(loc_hourly, "temperature_2m", target_idx, 25.0)
                     t2m_k = t2m + 273.15
                     
                     # Deep convective clouds lower CTT significantly when cloud cover & CAPE are high
                     ctt_est = max(195.0, t2m_k - (c_cover / 100.0) * 55.0 - min(30.0, c_val / 100.0))
-                    c_cover_prev = _get_val("cloud_cover", prev_idx, c_cover)
+                    c_cover_prev = _get_val(loc_hourly, "cloud_cover", prev_idx, c_cover)
                     ctt_prev = max(195.0, t2m_k - (c_cover_prev / 100.0) * 55.0)
                     ctt_drop_rate = ctt_est - ctt_prev
 
@@ -280,7 +280,7 @@ class OpenMeteoAdapter(BaseDataAdapter):
                     ctt_grid[i, j] = ctt_est
                     ctt_drop_grid[i, j] = ctt_drop_rate
                     precip_prob_grid[i, j] = precip_prob
-                    humidity_grid[i, j] = _get_val("relative_humidity_2m", target_idx, 60.0)
+                    humidity_grid[i, j] = _get_val(loc_hourly, "relative_humidity_2m", target_idx, 60.0)
                     cloud_cover_grid[i, j] = c_cover
                     temp_grid[i, j] = t2m
 
