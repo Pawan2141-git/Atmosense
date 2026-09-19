@@ -1,6 +1,6 @@
 # Atmosense 🌩️
 
-🔗 **Live Demo**: [https://atmosense-j1w8.vercel.app](https://atmosense-j1w8.vercel.app)
+
 
 **AI-Powered Hyperlocal Severe Weather Nowcasting & Early Warning System**
 
